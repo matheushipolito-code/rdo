@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RDO - Sinalização Viária</title>
+    <!-- Tailwind CSS para a interface do celular -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Bibliotecas de PDF (usadas diretamente, sem o html2pdf) -->
+    <script>
+        // Carrega uma biblioteca tentando vários servidores até um funcionar
+        function carregarLib(urls, pronto) {
+            return new Promise(function(resolve, reject) {
+                let i = 0;
+                (function tentar() {
+                    if (pronto()) return resolve();
+                    if (i >= urls.length) return reject(new Error('falha ao carregar ' + urls[0]));
+                    const sc = document.createElement('script');
+                    sc.src = urls[i++];
+                    sc.onload = function() { pronto() ? resolve() : tentar(); };
+                    sc.onerror = tentar;
+                    document.head.appendChild(sc);
+                })();
+            });
+        }
+        window.libsPronto = Promise.all([
+            carregarLib([
+                'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+                'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+                'https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js'
+            ], function() { return typeof window.html2canvas === 'function'; }),
+            carregarLib([
+                'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+                'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+                'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js'
+            ], function() { return !!(window.jspdf && window.jspdf.jsPDF); })
+        ]);
+    </script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        
+        /* O wrapper fica fixo bem longe da tela para o celular renderizar em tamanho real sem espremer */
+        #pdf-template-wrapper {
+            position: fixed;
+            top: 0;
+            left: -10000px;
+            z-index: -999;
+            display: block;
+        }
+
+        /* O modelo exato da Folha A4 em pixels */
+        #relatorio-pdf {
+            width: 794px;
+            min-height: 1122px;
+            padding: 40px;
+            background: white;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+            color: #000;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        #relatorio-pdf > * { flex-shrink: 0; }
+    </style>
+</head>
+<body class="antialiased text-gray-800 flex justify-center">
+
+    <!-- Aviso de diagnóstico (só aparece se algo falhar ao carregar) -->
+    <div id="avisoLibs" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9999; background:#b91c1c; color:#fff; padding:10px 14px; font:13px Arial,sans-serif; text-align:center;"></div>
+
+    <!-- ========================================== -->
+    <!-- INTERFACE DO APLICATIVO                    -->
+    <!-- ========================================== -->
+    <div class="w-full max-w-md bg-white min-h-screen relative shadow-2xl flex flex-col">
+        <header class="bg-amber-500 text-gray-900 p-4 sticky top-0 z-20 shadow-md flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold leading-tight">RDO Digital</h1>
+                <p class="text-xs font-medium text-amber-900">Sinalização Vertical e Horizontal · Sete Lagoas - MG</p>
+            </div>
+            <div class="bg-white p-2 rounded-xl shadow-sm text-amber-600">
+                <i class="fas fa-file-signature text-xl"></i>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto pb-24 p-4">
+            <form id="rdoForm" class="space-y-5">
+                
+                <!-- Identificação -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="font-semibold text-gray-700 mb-3 flex items-center border-b border-gray-200 pb-2">
+                        <i class="fas fa-id-card mr-2 text-amber-500"></i> Identificação
+                    </h2>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">RDO nº *</label>
+                            <input type="text" id="rdo_num" required class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Data *</label>
+                            <input type="date" id="data_rdo" required class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">OS nº *</label>
+                            <input type="text" id="os_num" required class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Atividade principal</label>
+                            <input type="text" id="atividade" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Local / Cruzamento *</label>
+                        <input type="text" id="local" required class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Tipo de sinalização *</label>
+                        <select id="tipo_sinal" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                            <option value="V">Vertical</option><option value="H">Horizontal</option><option value="VH">Vertical e Horizontal</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Tempo gasto (dias)</label>
+                            <input type="number" id="tempo_dias" min="0" step="1" inputmode="numeric" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm text-center">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Tempo gasto (horas)</label>
+                            <input type="number" id="tempo_horas" min="0" step="0.5" inputmode="decimal" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm text-center">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Contrato / Ata / Empresa (cabeçalho do PDF)</label>
+                        <input type="text" id="contrato" placeholder="Ex.: Contrato nº __/2026 | Empresa ..." class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Hora Início *</label>
+                            <input type="time" id="hora_inicio" required class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm text-center">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Hora Término</label>
+                            <input type="time" id="hora_termino" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm text-center">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Resp. Contratada</label>
+                            <input type="text" id="encarregado" required class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Fiscal Municipal</label>
+                            <input type="text" id="fiscal" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Clima, Efetivo, Veículos -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                    <div>
+                        <h2 class="font-semibold text-gray-700 mb-2 flex items-center border-b border-gray-200 pb-1">
+                            <i class="fas fa-cloud-sun mr-2 text-amber-500"></i> Clima
+                        </h2>
+                        <div class="grid grid-cols-3 gap-2">
+                            <select id="clima_manha" class="w-full p-2 bg-white border border-gray-300 rounded-lg outline-none text-xs text-center">
+                                <option disabled selected>Manhã</option><option>Bom</option><option>Nublado</option><option>Chuva</option>
+                            </select>
+                            <select id="clima_tarde" class="w-full p-2 bg-white border border-gray-300 rounded-lg outline-none text-xs text-center">
+                                <option disabled selected>Tarde</option><option>Bom</option><option>Nublado</option><option>Chuva</option>
+                            </select>
+                            <select id="clima_noite" class="w-full p-2 bg-white border border-gray-300 rounded-lg outline-none text-xs text-center">
+                                <option disabled selected>Noite</option><option>Bom</option><option>Nublado</option><option>Chuva</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <h2 class="font-semibold text-gray-700 mb-2 flex items-center border-b border-gray-200 pb-1 mt-2">
+                            <i class="fas fa-users mr-2 text-amber-500"></i> Efetivo (Qtd)
+                        </h2>
+                        <div class="grid grid-cols-4 gap-2">
+                            <input type="number" id="efetivo_eletricista" placeholder="Encarreg." min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                            <input type="number" id="efetivo_ajudante" placeholder="Ajudante" min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                            <input type="number" id="efetivo_tecnico" placeholder="Operador" min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                            <input type="number" id="efetivo_motorista" placeholder="Motoris." min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                        </div>
+                    </div>
+                    <div>
+                        <h2 class="font-semibold text-gray-700 mb-2 flex items-center border-b border-gray-200 pb-1 mt-2">
+                            <i class="fas fa-truck mr-2 text-amber-500"></i> Veículos / Equip. (Qtd)
+                        </h2>
+                        <div class="grid grid-cols-4 gap-2">
+                            <input type="number" id="veiculo_leve" placeholder="Leve" min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                            <input type="number" id="veiculo_cesto" placeholder="Caminhão" min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                            <input type="number" id="veiculo_munck" placeholder="Munck" min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                            <input type="number" id="veiculo_outros" placeholder="Outros" min="0" class="w-full p-2 bg-white border border-gray-300 rounded-lg text-center outline-none text-xs">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Serviços executados -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="font-semibold text-gray-700 mb-3 flex items-center border-b border-gray-200 pb-2">
+                        <i class="fas fa-list-check mr-2 text-amber-500"></i> Serviços Executados
+                    </h2>
+                    <input type="search" id="buscaServ" placeholder="Buscar (ex.: placa, tacha, tinta, suporte)" class="w-full p-2.5 bg-white border border-gray-300 rounded-lg outline-none text-sm mb-1">
+                    <p id="contServ" class="text-xs text-gray-500">Nenhum serviço selecionado</p>
+                    <div id="listaServicos"></div>
+                    <p class="text-xs text-gray-400 mt-2">Serviço fora da lista? Descreva em "Descrição dos Serviços".</p>
+                </div>
+
+                <!-- Descrição, Ocorrências -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                    <div>
+                        <h2 class="font-semibold text-gray-700 mb-2 flex items-center border-b border-gray-200 pb-1">
+                            <i class="fas fa-tools mr-2 text-amber-500"></i> Descrição dos Serviços
+                        </h2>
+                        <textarea id="descricao_servicos" rows="3" class="w-full p-2 bg-white border border-gray-300 rounded-lg outline-none text-sm" placeholder="O que foi feito, onde e em qual equipamento..."></textarea>
+                    </div>
+                    
+                    <div>
+                        <h2 class="font-semibold text-gray-700 mb-2 flex items-center border-b border-gray-200 pb-1">
+                            <i class="fas fa-exclamation-triangle mr-2 text-amber-500"></i> Ocorrências / Imprevistos
+                        </h2>
+                        <textarea id="observacoes" rows="2" class="w-full p-2 bg-white border border-gray-300 rounded-lg outline-none text-sm" placeholder="Interferências e providências adotadas..."></textarea>
+                    </div>
+                </div>
+
+                <!-- Foto -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="font-semibold text-gray-700 mb-3 flex items-center border-b border-gray-200 pb-2">
+                        <i class="fas fa-camera mr-2 text-amber-500"></i> Evidências (Fotos)
+                    </h2>
+                    <label class="block w-full border-2 border-dashed border-amber-300 bg-amber-50 rounded-lg p-6 text-center cursor-pointer hover:bg-amber-100 transition-colors">
+                        <i class="fas fa-cloud-upload-alt text-2xl text-amber-500 mb-2"></i>
+                        <span class="block text-sm font-medium text-gray-700">Toque para anexar fotos (máx. 5)</span>
+                        <input type="file" id="fotoInput" accept="image/*" multiple class="hidden">
+                    </label>
+                    <div id="previewContainer" class="hidden mt-3"><p id="fotoContador" class="text-xs text-green-600 font-bold mb-2"></p><div id="fotoGrid" class="grid grid-cols-3 gap-2"></div></div>
+                </div>
+            </form>
+        </main>
+
+        <div class="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 p-4 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20">
+            <button id="btnSubmit" type="submit" form="rdoForm" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center text-lg">
+                <i class="fas fa-file-pdf mr-2"></i> Baixar Relatório PDF
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal de Sucesso -->
+    <div id="successModal" class="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50 hidden backdrop-blur-sm px-4">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center">
+            <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+                <i class="fas fa-check text-2xl text-green-600"></i>
+            </div>
+            <h3 class="text-lg font-bold text-gray-900 mb-2">Relatório Gerado!</h3>
+            <p class="text-sm text-gray-500 mb-6">PDF formatado perfeitamente em A4 salvo nos Downloads.</p>
+            <button onclick="fecharModal()" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-4 rounded-xl shadow-sm">
+                Preencher Novo RDO
+            </button>
+        </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- TEMPLATE DO PDF - TABELAS PARA NÃO QUEBRAR -->
+    <!-- ========================================== -->
+    <div id="pdf-template-wrapper">
+        <div id="relatorio-pdf">
+            
+            <!-- Cabeçalho Oficial -->
+            <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px;">
+                <h1 style="font-size: 16px; font-weight: bold; margin: 0 0 5px 0;">PREFEITURA MUNICIPAL DE SETE LAGOAS – MG</h1>
+                <h2 style="font-size: 14px; font-weight: bold; margin: 0 0 5px 0;">RELATÓRIO DIÁRIO DE OBRAS / SERVIÇOS – SINALIZAÇÃO VIÁRIA</h2>
+                <p id="pdf-contrato" style="font-size: 11px; margin: 0;"></p>
+            </div>
+            
+            <!-- Tabela 1: Identificação -->
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px;">
+                <tr>
+                    <td style="border: 1px solid #000; padding: 6px; width: 33%;"><strong>RDO nº:</strong> <span id="pdf-rdo"></span></td>
+                    <td style="border: 1px solid #000; padding: 6px; width: 33%;"><strong>Data:</strong> <span id="pdf-data"></span></td>
+                    <td style="border: 1px solid #000; padding: 6px; width: 34%;"><strong>OS nº:</strong> <span id="pdf-os"></span></td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 6px;" colspan="2"><strong>Atividade:</strong> <span id="pdf-atividade"></span></td>
+                    <td style="border: 1px solid #000; padding: 6px;"><strong>Horário:</strong> <span id="pdf-hinicio"></span> às <span id="pdf-htermino"></span></td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 6px;" colspan="3"><strong>Local / Cruzamento:</strong> <span id="pdf-local"></span></td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 6px;" colspan="2"><strong>Tipo de sinalização:</strong> <span id="pdf-tipo"></span></td>
+                    <td style="border: 1px solid #000; padding: 6px;"><strong>Tempo gasto:</strong> <span id="pdf-tempo"></span></td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 6px;" colspan="2"><strong>Resp. da contratada:</strong> <span id="pdf-encarregado"></span></td>
+                    <td style="border: 1px solid #000; padding: 6px;"><strong>Fiscal municipal:</strong> <span id="pdf-fiscal"></span></td>
+                </tr>
+            </table>
+
+            <!-- Tabela 2: Clima, Efetivo, Veículos -->
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px;">
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px; background: #e5e7eb; font-weight: bold; text-align: center; width: 33%;">CLIMA</td>
+                    <td style="border: 1px solid #000; padding: 4px; background: #e5e7eb; font-weight: bold; text-align: center; width: 33%;">EFETIVO DA CONTRATADA</td>
+                    <td style="border: 1px solid #000; padding: 4px; background: #e5e7eb; font-weight: bold; text-align: center; width: 34%;">VEÍCULOS / EQUIPAMENTOS</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 6px; vertical-align: top;">
+                        <div style="margin-bottom: 4px;"><strong>Manhã:</strong> <span id="pdf-clima-m"></span></div>
+                        <div style="margin-bottom: 4px;"><strong>Tarde:</strong> <span id="pdf-clima-t"></span></div>
+                        <div><strong>Noite:</strong> <span id="pdf-clima-n"></span></div>
+                    </td>
+                    <td style="border: 1px solid #000; padding: 6px; vertical-align: top;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Encarregado:</span> <strong id="pdf-e-ele">0</strong></div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Ajudante:</span> <strong id="pdf-e-aju">0</strong></div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Operador:</span> <strong id="pdf-e-tec">0</strong></div>
+                        <div style="display: flex; justify-content: space-between;"><span>Motorista:</span> <strong id="pdf-e-mot">0</strong></div>
+                    </td>
+                    <td style="border: 1px solid #000; padding: 6px; vertical-align: top;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Leve/Pick:</span> <strong id="pdf-v-lev">0</strong></div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Caminhão:</span> <strong id="pdf-v-ces">0</strong></div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Cam.Munck:</span> <strong id="pdf-v-mun">0</strong></div>
+                        <div style="display: flex; justify-content: space-between;"><span>Outros:</span> <strong id="pdf-v-out">0</strong></div>
+                    </td>
+                </tr>
+            </table>
+
+            <!-- Blocos de Texto -->
+            <div style="border: 1px solid #000; margin-bottom: 15px; font-size: 12px;">
+                <div style="background: #e5e7eb; padding: 4px; font-weight: bold; border-bottom: 1px solid #000;">DESCRIÇÃO DOS SERVIÇOS REALIZADOS</div>
+                <div style="padding: 6px; min-height: 80px; white-space: pre-wrap;" id="pdf-desc"></div>
+            </div>
+
+            <div style="border: 1px solid #000; margin-bottom: 15px; font-size: 11px;">
+                <div style="background: #e5e7eb; padding: 4px; font-weight: bold; border-bottom: 1px solid #000; font-size: 12px;">SERVIÇOS EXECUTADOS (ITENS DA PLANILHA)</div>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead><tr>
+                        <th style="border: 1px solid #000; padding: 4px; width: 6%;">Nº</th><th style="border: 1px solid #000; padding: 4px;">Descrição</th>
+                        <th style="border: 1px solid #000; padding: 4px; width: 8%;">Un.</th><th style="border: 1px solid #000; padding: 4px; width: 12%;">Qtd.</th>
+                    </tr></thead>
+                    <tbody id="pdf-serv"></tbody>
+                </table>
+            </div>
+
+            <div style="border: 1px solid #000; margin-bottom: 15px; font-size: 12px;">
+                <div style="background: #e5e7eb; padding: 4px; font-weight: bold; border-bottom: 1px solid #000;">OCORRÊNCIAS, IMPREVISTOS E PROVIDÊNCIAS ADOTADAS</div>
+                <div style="padding: 6px; min-height: 40px; white-space: pre-wrap;" id="pdf-obs"></div>
+            </div>
+
+            <!-- Evidências Fotográficas -->
+            <div id="pdf-foto-container" style="display: none; border: 1px solid #000; margin-bottom: 15px; font-size: 12px;">
+                <div style="background: #e5e7eb; padding: 4px; font-weight: bold; border-bottom: 1px solid #000;">EVIDÊNCIAS / REGISTRO FOTOGRÁFICO</div>
+                <div id="pdf-fotos" style="padding: 6px;"></div>
+            </div>
+            
+            <!-- Assinatura Forçada pro Fim -->
+            <div style="margin-top: auto; padding-top: 30px;">
+                <table style="width: 100%; text-align: center; font-size: 12px;">
+                    <tr>
+                        <td style="width: 50%; padding: 10px;">
+                            <div style="border-top: 1px solid #000; margin: 0 auto 5px auto; width: 80%;"></div>
+                            <strong id="pdf-ass-contratada"></strong><br>
+                            <span>Responsável da Contratada</span>
+                        </td>
+                        <td style="width: 50%; padding: 10px;">
+                            <div style="border-top: 1px solid #000; margin: 0 auto 5px auto; width: 80%;"></div>
+                            <strong id="pdf-ass-fiscal"></strong><br>
+                            <span>Fiscal Municipal</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script>
+        // Diagnóstico: avisa na tela se alguma biblioteca não carregou
+        function mostrarAviso(msg) {
+            const a = document.getElementById('avisoLibs');
+            a.textContent = msg;
+            a.style.display = 'block';
+        }
+        window.libsPronto.catch(function() {
+            mostrarAviso('Não foi possível carregar a biblioteca de PDF. Verifique a internet e recarregue a página.');
+        });
+        window.addEventListener('load', function() {
+            if (typeof window.tailwind === 'undefined') {
+                mostrarAviso('O estilo da página (Tailwind) não carregou. Verifique a internet e recarregue a página.');
+            }
+        });
+
+        // Data atual preenchida por padrão
+        document.getElementById('data_rdo').value = new Date().toISOString().split('T')[0];
+
+        // Reduz a foto para no máx. 'maxLado' px (evita travar/falhar no celular)
+        function redimensionarFoto(dataUrl, maxLado, qualidade, callback) {
+            const img = new Image();
+            img.onload = function() {
+                const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+                const c = document.createElement('canvas');
+                c.width = Math.round(img.width * escala);
+                c.height = Math.round(img.height * escala);
+                c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                callback(c.toDataURL('image/jpeg', qualidade));
+            };
+            img.onerror = function() { callback(dataUrl); };
+            img.src = dataUrl;
+        }
+
+        // ===== Catálogo de serviços (V = vertical, H = horizontal) =====
+        // [tipo, grupo, unidade padrão, itens]  (item = texto ou [texto, unidade])
+        const CAT = [
+          ['H','Demarcação e remoção – horizontal','M²',[
+            'Demarcação com tinta resina metacrílica retrorrefletorizada 0,60mm úmida – mecanizada',
+            'Demarcação com tinta resina metacrílica retrorrefletorizada 0,60mm úmida – manual',
+            'Demarcação com termoplástico aspergido retrorrefletivo 1,5mm',
+            'Demarcação com termoplástico extrudado retrorrefletivo 3,0mm',
+            'Demarcação com laminado elastoplástico retrorrefletivo 1,5mm',
+            'Remoção de sinalização horizontal – tinta acrílica/metacrílica',
+            'Remoção de sinalização horizontal – maçarico a gás']],
+          ['H','Tachas, tachões e segregadores','UN',[
+            'Fornecimento e implantação de tacha refletiva monodirecional',
+            'Fornecimento e implantação de tacha refletiva bidirecional',
+            'Fornecimento e implantação de tachão refletivo monodirecional',
+            'Fornecimento e implantação de tachão refletivo bidirecional',
+            'Fornecimento e implantação de segregador',
+            'Implantação de tacha','Implantação de tachão',
+            'Remoção de tacha','Remoção de tachão','Remoção de segregador']],
+          ['V','Placas','UN',[
+            ['Fornecimento de placa simples aço carbono 1,25mm – película refletiva Tipo A (grau técnico)','M²'],
+            ['Fornecimento de placa simples aço carbono 1,25mm – película refletiva Tipo A (grau técnico – pró visual)','M²'],
+            'Implantação de placa em poste de concreto, poste de semáforo ou suporte simples existente',
+            'Implantação de placa em braço projetado existente',
+            'Remoção de placa em poste de concreto, poste de semáforo ou suporte',
+            'Remoção de placa em braço projetado existente']],
+          ['V','Suportes simples','UN',[
+            ['Fornecimento de suporte simples aço galvanizado Ø 2”','M'],
+            ['Fornecimento de suporte simples aço galvanizado Ø 3”','M'],
+            'Implantação de suporte simples Ø 2” (com fixação de placas)',
+            'Implantação de suporte simples Ø 3” (com fixação de placas)',
+            'Remoção de suporte simples Ø 2” (e placas, se houver)',
+            'Remoção de suporte simples Ø 3” (e placas, se houver)']],
+          ['V','Suporte com braço projetado','CJ',[
+            'Fornecimento e implantação de conjunto suporte Ø 4” / braço projetado Ø 3”',
+            'Fornecimento e implantação de conjunto suporte Ø 5” / braço projetado Ø 4”',
+            'Prolongador 50cm para conjunto suporte Ø 4” / braço Ø 3”',
+            'Prolongador 50cm para conjunto suporte Ø 5” / braço Ø 4”',
+            'Remoção de conjunto suporte Ø 4” / braço Ø 3” (e placas, se houver)',
+            'Remoção de conjunto suporte Ø 5” / braço Ø 4” (e placas, se houver)']],
+          ['V','Faixas de morim e postes de eucalipto','UN',[
+            'Fornecimento de faixas de morim (7,00x0,70m)',
+            'Implantação de faixa de morim – 1 poste CEMIG + 1 poste de eucalipto',
+            'Retirada de faixa de morim – 1 poste CEMIG + 1 poste de eucalipto',
+            'Implantação de faixa de morim – 2 postes CEMIG',
+            'Retirada de faixa de morim – 2 postes CEMIG',
+            'Implantação de faixa de morim – 2 postes de eucalipto',
+            'Retirada de faixa de morim – 2 postes de eucalipto',
+            'Fornecimento de poste de eucalipto']],
+          ['V','Parafusos e fixação','UN',[
+            'Parafuso sextavado zincado 1/4” x 1”','Parafuso sextavado zincado 1/4” x 3”',
+            'Porca 1/4”','Arruela lisa zincada 1/4”','Fita perfurada galvanizada',
+            ['Arame recozido trançado/torcido duplo BWG 18 (1,24mm)','M']]]
+        ];
+        const TXT = [];
+        const lista = document.getElementById('listaServicos');
+        CAT.forEach(function(g) {
+            const grp = document.createElement('div'); grp.className = 'grp';
+            grp.innerHTML = '<div class="text-xs font-bold text-amber-700 uppercase mt-4 mb-1">' + g[1] + '</div>';
+            g[3].forEach(function(it) {
+                const txt = Array.isArray(it) ? it[0] : it, un = Array.isArray(it) ? it[1] : g[2], id = TXT.push(txt) - 1;
+                const row = document.createElement('div');
+                row.className = 'srv py-2 border-b border-gray-200';
+                row.dataset.t = g[0]; row.dataset.busca = (txt + ' ' + g[1]).toLowerCase();
+                row.innerHTML = '<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="srv-chk mt-0.5 w-5 h-5 shrink-0" data-id="' + id + '" data-u="' + un + '"><span>' + txt + ' <span class="text-gray-400">(' + un + ')</span></span></label>' +
+                    '<div class="srv-q items-center gap-2 ml-7 mt-2" style="display:none"><input type="number" inputmode="decimal" step="any" min="0" placeholder="Qtd." class="srv-qtd w-28 p-2 bg-white border border-gray-300 rounded-lg text-sm text-center"><span class="text-xs text-gray-500">' + un + '</span></div>';
+                grp.appendChild(row);
+            });
+            lista.appendChild(grp);
+        });
+
+        function filtrarServicos() {
+            const tipo = document.getElementById('tipo_sinal').value;
+            const q = document.getElementById('buscaServ').value.trim().toLowerCase();
+            lista.querySelectorAll('.grp').forEach(function(g) {
+                let vis = 0;
+                g.querySelectorAll('.srv').forEach(function(r) {
+                    const ok = tipo.indexOf(r.dataset.t) >= 0 && (!q || r.dataset.busca.indexOf(q) >= 0);
+                    r.style.display = ok ? '' : 'none'; if (ok) vis++;
+                });
+                g.style.display = vis ? '' : 'none';
+            });
+        }
+        function sincronizarServicos() {
+            let n = 0;
+            lista.querySelectorAll('.srv').forEach(function(r) {
+                const c = r.querySelector('.srv-chk').checked; if (c) n++;
+                r.querySelector('.srv-q').style.display = c ? 'flex' : 'none';
+            });
+            document.getElementById('contServ').textContent = n ? n + ' serviço(s) selecionado(s)' : 'Nenhum serviço selecionado';
+        }
+        function coletarServicos() {
+            const out = [];
+            lista.querySelectorAll('.srv').forEach(function(r) {
+                const c = r.querySelector('.srv-chk');
+                if (c.checked) out.push({ txt: TXT[c.dataset.id], un: c.dataset.u, qtd: r.querySelector('.srv-qtd').value, campo: r.querySelector('.srv-qtd') });
+            });
+            return out;
+        }
+        lista.addEventListener('change', sincronizarServicos);
+        document.getElementById('buscaServ').addEventListener('input', filtrarServicos);
+        document.getElementById('tipo_sinal').addEventListener('change', function() {
+            const tipo = this.value;
+            lista.querySelectorAll('.srv').forEach(function(r) {
+                if (tipo.indexOf(r.dataset.t) < 0) r.querySelector('.srv-chk').checked = false;
+            });
+            sincronizarServicos(); filtrarServicos();
+        });
+        filtrarServicos();
+        try { document.getElementById('contrato').value = localStorage.getItem('rdo_contrato') || ''; } catch (_) {}
+
+        // ===== Fotos (até 5) =====
+        let fotos = [];
+        function renderFotos() {
+            const grid = document.getElementById('fotoGrid'); grid.innerHTML = '';
+            fotos.forEach(function(src, i) {
+                const d = document.createElement('div'); d.className = 'relative';
+                d.innerHTML = '<img src="' + src + '" class="w-full h-20 object-cover rounded border border-gray-300"><button type="button" data-i="' + i + '" class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 text-xs">✕</button>';
+                grid.appendChild(d);
+            });
+            document.getElementById('previewContainer').classList.toggle('hidden', !fotos.length);
+            document.getElementById('fotoContador').textContent = fotos.length + '/5 foto(s) anexada(s)';
+        }
+        document.getElementById('fotoGrid').addEventListener('click', function(e) {
+            if (e.target.dataset.i !== undefined) { fotos.splice(+e.target.dataset.i, 1); renderFotos(); }
+        });
+        document.getElementById('fotoInput').addEventListener('change', async function(e) {
+            const arqs = Array.from(e.target.files); e.target.value = '';
+            for (const f of arqs) {
+                if (fotos.length >= 5) { alert('Máximo de 5 fotos por relatório.'); break; }
+                const src = await new Promise(function(res) {
+                    const r = new FileReader();
+                    r.onload = function(ev) { redimensionarFoto(ev.target.result, 1280, 0.8, res); };
+                    r.onerror = function() { res(null); };
+                    r.readAsDataURL(f);
+                });
+                if (src) fotos.push(src);
+            }
+            renderFotos();
+        });
+
+        // Preenche no modelo do PDF: tipo, tempo, contrato, serviços e fotos
+        function preencherExtras() {
+            const t = document.getElementById('tipo_sinal');
+            document.getElementById('pdf-tipo').innerText = t.options[t.selectedIndex].text;
+            const d = document.getElementById('tempo_dias').value, h = document.getElementById('tempo_horas').value, p = [];
+            if (d) p.push(d + ' dia(s)'); if (h) p.push(h + ' h');
+            document.getElementById('pdf-tempo').innerText = p.join(' e ') || '---';
+            const c = document.getElementById('contrato').value.trim(), pc = document.getElementById('pdf-contrato');
+            pc.innerText = c; pc.style.display = c ? '' : 'none';
+            try { localStorage.setItem('rdo_contrato', c); } catch (_) {}
+
+            const tb = document.getElementById('pdf-serv'); tb.innerHTML = '';
+            const cel = 'border:1px solid #000;padding:4px;', sv = coletarServicos();
+            if (!sv.length) tb.innerHTML = '<tr><td colspan="4" style="' + cel + 'text-align:center;">Nenhum item da planilha informado.</td></tr>';
+            sv.forEach(function(x, i) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td style="' + cel + 'text-align:center;">' + (i + 1) + '</td><td style="' + cel + '">' + x.txt + '</td><td style="' + cel + 'text-align:center;">' + x.un + '</td><td style="' + cel + 'text-align:right;"><strong>' + Number(x.qtd).toLocaleString('pt-BR') + '</strong></td>';
+                tb.appendChild(tr);
+            });
+
+            const box = document.getElementById('pdf-fotos'); box.innerHTML = '';
+            for (let i = 0; i < fotos.length; i += 2) {
+                const lin = document.createElement('div'); lin.className = 'foto-linha';
+                lin.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;';
+                fotos.slice(i, i + 2).forEach(function(src) {
+                    const c2 = document.createElement('div'); c2.style.cssText = 'flex:1;text-align:center;';
+                    const im = document.createElement('img'); im.src = src;
+                    im.style.cssText = 'max-width:100%;max-height:230px;border:1px solid #ccc;padding:2px;';
+                    c2.appendChild(im); lin.appendChild(c2);
+                });
+                box.appendChild(lin);
+            }
+            document.getElementById('pdf-foto-container').style.display = fotos.length ? 'block' : 'none';
+        }
+
+        // Limpa tudo após o sucesso
+        function fecharModal() {
+            document.getElementById('successModal').classList.add('hidden');
+            document.getElementById('rdoForm').reset();
+            document.getElementById('data_rdo').value = new Date().toISOString().split('T')[0];
+            try { document.getElementById('contrato').value = localStorage.getItem('rdo_contrato') || ''; } catch (_) {}
+            fotos = []; renderFotos();
+            sincronizarServicos(); filtrarServicos();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Gera o arquivo
+        document.getElementById('rdoForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const faltando = coletarServicos().find(function(x) { return !(Number(x.qtd) > 0); });
+            if (faltando) { alert('Informe a quantidade de: ' + faltando.txt); faltando.campo.focus(); return; }
+
+            const btnSubmit = document.getElementById('btnSubmit');
+            const originalText = btnSubmit.innerHTML;
+            btnSubmit.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Processando PDF...';
+            btnSubmit.disabled = true;
+
+            // Transfere valores do formulário para as tabelas do PDF
+            const dataInp = document.getElementById('data_rdo').value;
+            const dataBR = dataInp.split('-').reverse().join('/');
+            
+            document.getElementById('pdf-rdo').innerText = document.getElementById('rdo_num').value || '---';
+            document.getElementById('pdf-os').innerText = document.getElementById('os_num').value || '---';
+            document.getElementById('pdf-data').innerText = dataBR;
+            document.getElementById('pdf-atividade').innerText = document.getElementById('atividade').value || '---';
+            document.getElementById('pdf-hinicio').innerText = document.getElementById('hora_inicio').value || '---';
+            document.getElementById('pdf-htermino').innerText = document.getElementById('hora_termino').value || '---';
+            document.getElementById('pdf-local').innerText = document.getElementById('local').value || '---';
+            
+            const enc = document.getElementById('encarregado').value || '---';
+            const fisc = document.getElementById('fiscal').value || '---';
+            
+            document.getElementById('pdf-encarregado').innerText = enc;
+            document.getElementById('pdf-ass-contratada').innerText = enc;
+            document.getElementById('pdf-fiscal').innerText = fisc;
+            document.getElementById('pdf-ass-fiscal').innerText = fisc;
+
+            document.getElementById('pdf-clima-m').innerText = document.getElementById('clima_manha').value || '-';
+            document.getElementById('pdf-clima-t').innerText = document.getElementById('clima_tarde').value || '-';
+            document.getElementById('pdf-clima-n').innerText = document.getElementById('clima_noite').value || '-';
+
+            document.getElementById('pdf-e-ele').innerText = document.getElementById('efetivo_eletricista').value || '0';
+            document.getElementById('pdf-e-aju').innerText = document.getElementById('efetivo_ajudante').value || '0';
+            document.getElementById('pdf-e-tec').innerText = document.getElementById('efetivo_tecnico').value || '0';
+            document.getElementById('pdf-e-mot').innerText = document.getElementById('efetivo_motorista').value || '0';
+
+            document.getElementById('pdf-v-lev').innerText = document.getElementById('veiculo_leve').value || '0';
+            document.getElementById('pdf-v-ces').innerText = document.getElementById('veiculo_cesto').value || '0';
+            document.getElementById('pdf-v-mun').innerText = document.getElementById('veiculo_munck').value || '0';
+            document.getElementById('pdf-v-out').innerText = document.getElementById('veiculo_outros').value || '0';
+
+            document.getElementById('pdf-desc').innerText = document.getElementById('descricao_servicos').value || '---';
+            preencherExtras();
+            document.getElementById('pdf-obs').innerText = document.getElementById('observacoes').value || 'Sem ocorrências.';
+
+            // GERA O PDF
+            const elemento = document.getElementById('relatorio-pdf');
+            const nomeArquivo = `RDO_${dataInp}_${document.getElementById('local').value.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 15)}.pdf`;
+            const restaurarBotao = () => { btnSubmit.innerHTML = originalText; btnSubmit.disabled = false; };
+
+            window.libsPronto
+                .then(() => (document.fonts && document.fonts.ready) ? document.fonts.ready : null)
+                .then(() => Promise.all(Array.from(elemento.querySelectorAll('img')).map(i => i.decode ? i.decode().catch(() => {}) : null)))
+                .then(() => new Promise(r => setTimeout(r, 150)))
+                .then(() => {
+                    // Pontos onde é permitido quebrar de página (fim de blocos, linhas da tabela e fotos)
+                    const topo = elemento.getBoundingClientRect().top, marcas = [];
+                    Array.from(elemento.children).forEach(c => { if (c.id !== 'pdf-foto-container') marcas.push(c.getBoundingClientRect().bottom - topo); });
+                    elemento.querySelectorAll('#pdf-serv tr, .foto-linha').forEach(r => marcas.push(r.getBoundingClientRect().bottom - topo));
+                    marcas.sort((a, b) => a - b);
+                    return html2canvas(elemento, {
+                        scale: elemento.scrollHeight > 2600 ? 1.5 : 2,
+                        useCORS: true, backgroundColor: '#ffffff',
+                        width: 794, windowWidth: 794, scrollX: 0, scrollY: 0,
+                        onclone: function(docClone) {
+                            const w = docClone.getElementById('pdf-template-wrapper');
+                            w.style.position = 'absolute'; w.style.left = '0px'; w.style.top = '0px'; w.style.zIndex = '0';
+                        }
+                    }).then(canvas => ({ canvas, marcas }));
+                })
+                .then(({ canvas, marcas }) => {
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+                    const k = canvas.width / 794, PH = 1122.5, MT = 36, MB = 24, mm = 210 / 794;
+                    const total = canvas.height / k;
+                    let y = 0, pag = 0;
+                    while (y < total - 1) {
+                        const topoPag = pag === 0 ? 0 : MT, util = PH - topoPag;
+                        let fim;
+                        if (total - y <= util + 1) { fim = total; }
+                        else {
+                            const limite = y + util - MB;
+                            const cand = marcas.filter(m => m > y + 60 && m <= limite);
+                            fim = cand.length ? cand[cand.length - 1] : limite;
+                        }
+                        const hPx = Math.ceil((fim - y) * k), fatia = document.createElement('canvas');
+                        fatia.width = canvas.width; fatia.height = hPx;
+                        const ctx = fatia.getContext('2d');
+                        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, fatia.width, hPx);
+                        ctx.drawImage(canvas, 0, Math.round(y * k), canvas.width, hPx, 0, 0, canvas.width, hPx);
+                        if (pag > 0) pdf.addPage();
+                        pdf.addImage(fatia.toDataURL('image/jpeg', 0.92), 'JPEG', 0, topoPag * mm, 210, (hPx / k) * mm);
+                        y = fim; pag++;
+                    }
+                    pdf.save(nomeArquivo);
+                    restaurarBotao();
+                    document.getElementById('successModal').classList.remove('hidden');
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('Erro ao gerar o arquivo PDF.');
+                    restaurarBotao();
+                });
+        });
+    </script>
+</body>
+</html>
