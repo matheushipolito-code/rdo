@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>REVADEF - Controle de Pontuação</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script>
+function carregarLib(urls, pronto) {
+  return new Promise(function(resolve, reject) {
+    let i = 0;
+    (function tentar() {
+      if (pronto()) return resolve();
+      if (i >= urls.length) return reject(new Error('falha ' + urls[0]));
+      const sc = document.createElement('script'); sc.src = urls[i++];
+      sc.onload = function() { pronto() ? resolve() : tentar(); }; sc.onerror = tentar;
+      document.head.appendChild(sc);
+    })();
+  });
+}
+window.libsPronto = Promise.all([
+  carregarLib(['https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js','https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js','https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js'], function() { return typeof window.html2canvas === 'function'; }),
+  carregarLib(['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js','https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js'], function() { return !!(window.jspdf && window.jspdf.jsPDF); })
+]);
+</script>
+<style>
+body{font-family:'Inter',sans-serif;background:#f3f4f6}
+#pdf-wrap{position:fixed;top:0;left:-10000px;z-index:-999;display:block}
+.pdfpg{width:794px;min-height:1122px;padding:40px;box-sizing:border-box;background:#fff;font-family:Arial,sans-serif;color:#000;display:flex;flex-direction:column}
+.pdfpg>*{flex-shrink:0}
+.bx{border:1px solid #000;margin-bottom:15px;font-size:12px}
+.bh{background:#e5e7eb;padding:4px;font-weight:bold;border-bottom:1px solid #000}
+.tb{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:15px}
+.tb td,.tb th{border:1px solid #000;padding:4px}
+.tb th{background:#e5e7eb}
+.inp{width:100%;padding:.6rem;background:#fff;border:1px solid #d1d5db;border-radius:.5rem;outline:none;font-size:.875rem}
+</style>
+</head>
+<body class="antialiased text-gray-800 flex justify-center">
+<div id="avisoLibs" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:10px 14px;font:13px Arial,sans-serif;text-align:center"></div>
+
+<div class="w-full max-w-md bg-white min-h-screen relative shadow-2xl flex flex-col">
+  <header class="bg-amber-500 text-gray-900 p-4 sticky top-0 z-20 shadow-md">
+    <div class="flex justify-between items-center">
+      <div><h1 class="text-xl font-bold leading-tight">REVADEF Digital</h1><p class="text-xs font-medium text-amber-900">Controle de pontuação · Sete Lagoas - MG</p></div>
+      <div class="bg-white rounded-xl shadow-sm px-3 py-1 text-center"><div class="text-[10px] text-gray-500 leading-none">PONTOS</div><div id="ptsTopo" class="text-lg font-bold text-amber-600 leading-tight">0</div></div>
+    </div>
+    <div class="grid grid-cols-2 gap-2 mt-3">
+      <button type="button" id="tabD" class="py-2 rounded-lg font-semibold text-sm bg-white text-amber-700">Relatório Diário</button>
+      <button type="button" id="tabM" class="py-2 rounded-lg font-semibold text-sm bg-amber-400 text-gray-900">Fechamento Mensal</button>
+    </div>
+  </header>
+
+  <main class="flex-1 pb-28 p-4 space-y-4">
+    <!-- Fiscal (compartilhado) -->
+    <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+      <h2 class="font-semibold text-gray-700 flex items-center border-b border-gray-200 pb-2"><i class="fas fa-user-tag mr-2 text-amber-500"></i> Fiscal</h2>
+      <div><label class="block text-xs font-medium text-gray-500 mb-1">Nome *</label><input id="nome" class="inp" required></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-gray-500 mb-1">Matrícula *</label><input id="matricula" class="inp" required></div>
+        <div><label class="block text-xs font-medium text-gray-500 mb-1">Secretaria *</label><select id="secretaria" class="inp"><option>SEMOB</option><option>SME</option></select></div>
+      </div>
+    </div>
+
+    <!-- ===== ABA DIÁRIO ===== -->
+    <form id="formD" class="space-y-4">
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+        <h2 class="font-semibold text-gray-700 flex items-center border-b border-gray-200 pb-2"><i class="fas fa-calendar-day mr-2 text-amber-500"></i> Dia trabalhado</h2>
+        <div><label class="block text-xs font-medium text-gray-500 mb-1">Data *</label><input type="date" id="data" class="inp" required></div>
+        <div><label class="block text-xs font-medium text-gray-500 mb-1">Veículo / Serviço (resumo)</label><input id="servico" class="inp" placeholder="Ex.: EIV, análise de frota, OS's"></div>
+      </div>
+
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
+        <h2 class="font-semibold text-gray-700 flex items-center border-b border-gray-200 pb-2 mb-2"><i class="fas fa-list-check mr-2 text-amber-500"></i> Itens atendidos</h2>
+        <input type="search" id="busca" placeholder="Buscar (ex.: multas, lacres, OS, táxi)" class="inp mb-1">
+        <p id="contItens" class="text-xs text-gray-500 mb-2">Nenhum item selecionado</p>
+        <div id="listaItens" class="space-y-2"></div>
+      </div>
+
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+        <div><h2 class="font-semibold text-gray-700 mb-1 text-sm">Descrição das atividades</h2><textarea id="desc" rows="3" class="inp" placeholder="O que foi feito, onde, empresas/veículos fiscalizados..."></textarea></div>
+        <div><h2 class="font-semibold text-gray-700 mb-1 text-sm">Observações</h2><textarea id="obs" rows="2" class="inp"></textarea></div>
+      </div>
+
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
+        <h2 class="font-semibold text-gray-700 mb-3 flex items-center border-b border-gray-200 pb-2"><i class="fas fa-camera mr-2 text-amber-500"></i> Fotos (até 10)</h2>
+        <label class="block w-full border-2 border-dashed border-amber-300 bg-amber-50 rounded-lg p-5 text-center cursor-pointer">
+          <i class="fas fa-cloud-upload-alt text-2xl text-amber-500 mb-1"></i><span class="block text-sm font-medium text-gray-700">Toque para anexar fotos</span>
+          <input type="file" id="fotoInput" accept="image/*" multiple class="hidden">
+        </label>
+        <div id="fotoBox" class="hidden mt-3"><p id="fotoCont" class="text-xs text-green-600 font-bold mb-2"></p><div id="fotoGrid" class="grid grid-cols-3 gap-2"></div>
+        <p class="text-[11px] text-gray-400 mt-2">As fotos entram só no PDF; não ficam salvas no aplicativo.</p></div>
+      </div>
+    </form>
+
+    <!-- ===== ABA MENSAL ===== -->
+    <section id="painelM" class="space-y-4" style="display:none">
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+        <h2 class="font-semibold text-gray-700 flex items-center border-b border-gray-200 pb-2"><i class="fas fa-calendar-alt mr-2 text-amber-500"></i> Mês de referência</h2>
+        <input type="month" id="mes" class="inp">
+      </div>
+      <div class="bg-gray-50 p-3 rounded-xl border border-gray-200 shadow-sm">
+        <table class="w-full text-xs"><thead><tr class="text-gray-500 text-left"><th class="py-1">Dia</th><th>Registro</th><th class="text-right">Pts</th><th></th></tr></thead><tbody id="linhasMes"></tbody></table>
+      </div>
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm">
+        <h2 class="font-semibold text-gray-700 mb-2 text-sm">Pontos por setor</h2>
+        <div id="resSetor" class="text-xs space-y-1"></div>
+        <div class="flex justify-between items-center border-t border-gray-300 mt-3 pt-3"><span class="font-bold text-gray-700">TOTAL DO MÊS</span><span id="totMes" class="text-2xl font-bold text-amber-600">0</span></div>
+      </div>
+      <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-2">
+        <h2 class="font-semibold text-gray-700 text-sm">Backup dos registros</h2>
+        <p class="text-[11px] text-gray-500">Os dias ficam salvos neste aparelho/navegador. Exporte um backup de vez em quando ou para juntar registros de outro aparelho.</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" id="btnExp" class="py-2 rounded-lg border border-amber-400 text-amber-700 text-sm font-semibold">Exportar</button>
+          <label class="py-2 rounded-lg border border-amber-400 text-amber-700 text-sm font-semibold text-center cursor-pointer">Importar<input type="file" id="impInput" accept=".json,application/json" class="hidden"></label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 p-3 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20">
+    <div id="barraD" class="grid grid-cols-3 gap-2">
+      <button type="button" id="btnSalvar" class="col-span-1 border border-amber-500 text-amber-700 font-bold rounded-xl py-3 text-sm">Só salvar</button>
+      <button type="submit" form="formD" id="btnPdfD" class="col-span-2 bg-amber-600 text-white font-bold rounded-xl py-3 flex items-center justify-center"><i class="fas fa-file-pdf mr-2"></i> Salvar e baixar PDF</button>
+    </div>
+    <button type="button" id="btnPdfM" class="w-full bg-amber-600 text-white font-bold rounded-xl py-3 items-center justify-center" style="display:none"><i class="fas fa-file-pdf mr-2"></i> Baixar PDF do mês</button>
+  </div>
+</div>
+
+<div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 items-center justify-center z-50 px-4" style="display:none">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center">
+    <div class="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-green-100 mb-3"><i class="fas fa-check text-2xl text-green-600"></i></div>
+    <h3 id="modalT" class="text-lg font-bold text-gray-900 mb-1"></h3><p id="modalP" class="text-sm text-gray-500 mb-5"></p>
+    <button type="button" id="modalNovo" class="w-full bg-amber-500 text-white font-bold py-3 rounded-xl mb-2">Lançar novo dia</button>
+    <button type="button" id="modalOk" class="w-full border border-gray-300 text-gray-600 font-semibold py-2 rounded-xl">Fechar</button>
+  </div>
+</div>
+
+<!-- ===== MODELOS DE PDF ===== -->
+<div id="pdf-wrap">
+  <div id="pdf-dia" class="pdfpg">
+    <div style="text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:15px">
+      <h1 style="font-size:16px;font-weight:bold;margin:0 0 5px">PREFEITURA MUNICIPAL DE SETE LAGOAS – MG</h1>
+      <h2 style="font-size:14px;font-weight:bold;margin:0 0 5px">RELATÓRIO DIÁRIO DE ATIVIDADES DE FISCALIZAÇÃO</h2>
+      <p style="font-size:11px;margin:0">Cálculo consolidado de REVADEF</p>
+    </div>
+    <table class="tb" style="font-size:12px"><tr><td style="width:50%"><b>Data:</b> <span id="pd-data"></span></td><td><b>Dia da semana:</b> <span id="pd-sem"></span></td></tr>
+      <tr><td><b>Nome:</b> <span id="pd-nome"></span></td><td><b>Matrícula:</b> <span id="pd-mat"></span></td></tr>
+      <tr><td><b>Secretaria:</b> <span id="pd-sec"></span></td><td><b>Veículo / Serviço:</b> <span id="pd-serv"></span></td></tr></table>
+    <table class="tb"><thead><tr><th style="width:9%">Item</th><th>Descrição</th><th style="width:7%">Qtd.</th><th style="width:10%">Pts un.</th><th style="width:10%">Pontos</th></tr></thead><tbody id="pd-itens"></tbody>
+      <tfoot><tr><td colspan="4" style="text-align:right"><b>TOTAL DE PONTOS DO DIA</b></td><td style="text-align:center"><b id="pd-tot"></b></td></tr></tfoot></table>
+    <div class="bx"><div class="bh">DESCRIÇÃO DAS ATIVIDADES</div><div id="pd-desc" style="padding:6px;min-height:60px;white-space:pre-wrap"></div></div>
+    <div class="bx"><div class="bh">OBSERVAÇÕES</div><div id="pd-obs" style="padding:6px;min-height:30px;white-space:pre-wrap"></div></div>
+    <div id="pd-fbox" data-nq class="bx" style="display:none"><div class="bh">REGISTRO FOTOGRÁFICO</div><div id="pd-fotos" style="padding:6px"></div></div>
+    <div style="margin-top:auto;padding-top:30px"><table style="width:100%;text-align:center;font-size:12px"><tr><td style="width:50%;padding:10px"><div style="border-top:1px solid #000;margin:0 auto 5px;width:80%"></div><b id="pd-ass"></b><br>Fiscal</td><td style="width:50%;padding:10px"><div style="border-top:1px solid #000;margin:0 auto 5px;width:80%"></div><br>Chefia imediata</td></tr></table></div>
+  </div>
+
+  <div id="pdf-mes" class="pdfpg" style="display:none">
+    <div style="text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:15px">
+      <h1 style="font-size:16px;font-weight:bold;margin:0 0 5px">PREFEITURA MUNICIPAL DE SETE LAGOAS – MG</h1>
+      <h2 style="font-size:14px;font-weight:bold;margin:0 0 5px">FECHAMENTO MENSAL DE PONTUAÇÃO – REVADEF</h2>
+      <p style="font-size:11px;margin:0">Referência: <b id="pm-ref"></b></p>
+    </div>
+    <table class="tb" style="font-size:12px"><tr><td style="width:50%"><b>Nome:</b> <span id="pm-nome"></span></td><td><b>Matrícula:</b> <span id="pm-mat"></span></td></tr><tr><td colspan="2"><b>Secretaria:</b> <span id="pm-sec"></span></td></tr></table>
+    <table class="tb"><thead><tr><th style="width:11%">Data</th><th style="width:11%">Dia</th><th>Serviço / Itens</th><th style="width:9%">Pontos</th></tr></thead><tbody id="pm-dias"></tbody></table>
+    <table class="tb" style="width:60%"><thead><tr><th>Setor</th><th style="width:22%">Pontos</th></tr></thead><tbody id="pm-set"></tbody>
+      <tfoot><tr><td style="text-align:right"><b>TOTAL DO MÊS</b></td><td style="text-align:center;font-size:13px"><b id="pm-tot"></b></td></tr></tfoot></table>
+    <div style="margin-top:auto;padding-top:30px"><table style="width:100%;text-align:center;font-size:12px"><tr><td style="width:50%;padding:10px"><div style="border-top:1px solid #000;margin:0 auto 5px;width:80%"></div><b id="pm-ass"></b><br>Fiscal</td><td style="width:50%;padding:10px"><div style="border-top:1px solid #000;margin:0 auto 5px;width:80%"></div><br>Chefia imediata</td></tr></table></div>
+  </div>
+</div>
+
+<script>
+const SETORES = [{"n": 1, "nome": "TRANSPORTE COLETIVO URBANO - CONCESSÃO", "itens": [["1.01", "Emissão/controle de OS vistorias (semestral)", 80], ["1.02", "Controle usuários/IPK", 100], ["1.03", "Fiscalização horários/linhas/itinerários", 40], ["1.04", "Mudanças de horários/itinerários", 100], ["1.05", "Cumprimento gratuidades", 50], ["1.06.G1", "Notificações/Multas grupo 1", 20], ["1.06.G2", "Notificações/Multas grupo 2", 25], ["1.06.G3", "Notificações/Multas grupo 3", 30], ["1.06.G4", "Notificações/Multas grupo 4", 40], ["1.06.G5", "Notificações/Multas grupo 5", 50], ["1.06.G6", "Notificações/Multas grupo 6", 60], ["1.06.G7", "Notificações/Multas grupo 7", 70], ["1.06.G8", "Notificações/Multas grupo 8", 80], ["1.07", "Instalação lacres", 60], ["1.08", "Retirada lacres", 60], ["1.09", "Fiscalização lacres", 40], ["1.10", "Pesquisa criação/extensão linhas", 100], ["1.11", "Verificação quadro horários", 40], ["1.12", "Notificações com relatório", 60], ["1.13", "Análises diversas", 40]]}, {"n": 2, "nome": "TRANSPORTE COLETIVO URBANO - ALTERNATIVO", "itens": [["2.01", "OS vistorias", 60], ["2.02", "Fiscalização horários", 35], ["2.03", "Gratuidades", 50], ["2.04.G1", "Notificações grupo", 35], ["2.04.G2", "Notificações grupo", 40], ["2.04.G3", "Notificações grupo", 50], ["2.05.G1", "Multas grupo", 60], ["2.05.G2", "Multas grupo", 70], ["2.05.G3", "Multas grupo", 80], ["2.06", "Descaracterização", 50], ["2.07", "Substituição veículos", 60], ["2.08", "Pesquisa linhas", 100], ["2.09", "Tarifas", 60], ["2.10", "IPK", 70], ["2.11", "Análises diversas", 40]]}, {"n": 3, "nome": "TRANSPORTE TÁXI", "itens": [["3.01", "OS vistorias anual", 70], ["3.02", "Notificação regularização", 50], ["3.03", "Uso pontos", 35], ["3.04", "Substituição", 60], ["3.05", "Transferência", 60], ["3.06", "Permuta veículos", 60], ["3.07", "Permuta pontos", 60], ["3.08", "Empresas", 60], ["3.09", "Bandeira II", 60], ["3.10.G1", "Multas grupo", 20], ["3.10.G2", "Multas grupo", 25], ["3.10.G3", "Multas grupo", 30], ["3.10.G4", "Multas grupo", 40], ["3.10.G5", "Multas grupo", 50], ["3.11", "Mudança ponto", 80], ["3.12", "Descaracterização", 50], ["3.13", "Tarifas", 40], ["3.14", "Análises diversas", 40]]}, {"n": 4, "nome": "TRANSPORTE ESCOLAR", "itens": [["4.01", "OS vistorias", 60], ["4.02.G1", "Multas", 40], ["4.02.G2", "Multas", 50], ["4.02.G3", "Multas", 60], ["4.02.G4", "Multas", 70], ["4.02.G5", "Multas", 80], ["4.03", "Pontos escolares", 80], ["4.04", "Apreensão", 100], ["4.05", "Substituição", 60], ["4.06", "Transferência", 60], ["4.07", "Permuta", 60], ["4.08", "Descaracterização", 50], ["4.09", "Análises diversas", 40]]}, {"n": 5, "nome": "DEMAIS VEÍCULOS DE ALUGUEL", "itens": [["5.01", "OS vistorias", 70], ["5.02", "Substituição", 60], ["5.03", "Permuta", 60], ["5.04", "Fiscalização selo", 50], ["5.05", "Apreensão", 100], ["5.06", "Análises diversas", 40]]}, {"n": 6, "nome": "VEÍCULOS DE TRAÇÃO ANIMAL", "itens": [["6.01", "Pontos autorizados", 70], ["6.02", "Situação veículo", 40], ["6.03", "Alvará", 50], ["6.04", "Análises diversas", 40]]}, {"n": 7, "nome": "FISCALIZAÇÃO DE VEÍCULOS MUNICIPAIS", "itens": [["7.01", "Uso veículos", 60], ["7.02", "Transporte funcionários", 50]]}, {"n": 8, "nome": "MOTO TÁXI", "itens": [["8.01", "OS vistorias", 60], ["8.02", "Pontos", 45], ["8.03", "Substituição", 60], ["8.04", "Permuta", 60], ["8.05.G1", "Multas", 40], ["8.05.G2", "Multas", 50], ["8.05.G3", "Multas", 60], ["8.05.G4", "Multas", 70], ["8.05.G5", "Multas", 80], ["8.06", "Descaracterização", 50], ["8.07", "Tarifas", 50], ["8.08", "Análises diversas", 40]]}, {"n": 9, "nome": "FISCALIZAÇÃO TERMINAL RODOVIÁRIO", "itens": [["9.01", "Tarifas", 60], ["9.02", "Banheiros", 20], ["9.03", "Reclamações", 50], ["9.04", "Relatório diário", 20], ["9.05", "Gratuidades", 20], ["9.06", "Horários intermunicipal", 35], ["9.07", "Contrato", 30], ["9.08", "Notificação concessão", 20], ["9.09", "Informações", 20], ["9.10", "Lojas", 40], ["9.11", "Taxas embarque", 60], ["9.12", "Arrecadação", 80], ["9.13", "Análises diversas", 40]]}, {"n": 10, "nome": "OUTRAS ATIVIDADES", "itens": [["10.01", "Escalas especiais", 100], ["10.02", "Relatório público", 50], ["10.03", "Distribuição material", 50], ["10.04", "Programas educativos", 100], ["10.05", "Participação", 70], ["10.06", "Relatórios fiscalização", 50], ["10.07", "Coleta dados", 100], ["10.08", "Capacitação", 60]]}];
+const MAPA = {}; SETORES.forEach(function(s) { s.itens.forEach(function(i) { MAPA[i[0]] = { desc: i[1], pts: i[2], setor: s.n }; }); });
+const SEM = ['DOMINGO','SEGUNDA','TERÇA','QUARTA','QUINTA','SEXTA','SÁBADO'];
+const $ = function(id) { return document.getElementById(id); };
+const esc = function(t) { return String(t).replace(/[&<>]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); };
+const br = function(iso) { return iso.split('-').reverse().join('/'); };
+const hoje = function() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const semDe = function(iso) { const p = iso.split('-'); return SEM[new Date(+p[0], +p[1] - 1, +p[2]).getDay()]; };
+function aviso(m) { const a = $('avisoLibs'); a.textContent = m; a.style.display = 'block'; }
+window.libsPronto.catch(function() { aviso('Não foi possível carregar a biblioteca de PDF. Verifique a internet e recarregue a página.'); });
+window.addEventListener('load', function() { if (typeof window.tailwind === 'undefined') aviso('O estilo da página (Tailwind) não carregou. Verifique a internet e recarregue a página.'); });
+
+// ===== Armazenamento local =====
+const KEY = 'revadef_v1';
+let store = { perfil: { nome: '', matricula: '', secretaria: 'SEMOB' }, dias: {} };
+try { const r = localStorage.getItem(KEY); if (r) { const o = JSON.parse(r); store.perfil = Object.assign(store.perfil, o.perfil || {}); store.dias = o.dias || {}; } }
+catch (e) { aviso('Armazenamento do navegador indisponível: os dias não ficarão salvos para o fechamento mensal.'); }
+function gravar() { try { localStorage.setItem(KEY, JSON.stringify(store)); return true; } catch (e) { aviso('Não foi possível salvar neste navegador. Use "Exportar" para guardar seus dados.'); return false; } }
+const ptsReg = function(r) { let t = 0; if (r && r.itens) Object.keys(r.itens).forEach(function(c) { if (MAPA[c]) t += MAPA[c].pts * r.itens[c]; }); return t; };
+
+// ===== Perfil =====
+['nome', 'matricula', 'secretaria'].forEach(function(k) {
+  $(k).value = store.perfil[k] || '';
+  $(k).addEventListener('change', function() { store.perfil[k] = $(k).value.trim(); gravar(); });
+});
+
+// ===== Lista de itens =====
+const lista = $('listaItens');
+SETORES.forEach(function(s) {
+  const d = document.createElement('details'); d.className = 'bg-white border border-gray-200 rounded-lg'; d.dataset.s = s.n;
+  d.innerHTML = '<summary class="p-3 text-sm font-semibold text-gray-700 cursor-pointer">' + s.n + ' ' + esc(s.nome) + ' <span class="sc text-xs text-amber-600 font-bold"></span></summary><div class="px-3 pb-2"></div>';
+  const box = d.lastChild;
+  s.itens.forEach(function(it) {
+    const r = document.createElement('div'); r.className = 'it py-2 border-t border-gray-100'; r.dataset.b = (it[0] + ' ' + it[1] + ' ' + s.nome).toLowerCase();
+    r.innerHTML = '<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="chk mt-0.5 w-5 h-5 shrink-0" data-c="' + it[0] + '"><span class="flex-1"><b>' + it[0] + '</b> ' + esc(it[1]) + '</span><span class="text-xs font-bold text-amber-700 whitespace-nowrap">' + it[2] + ' pts</span></label>' +
+      '<div class="qt items-center gap-2 ml-7 mt-2 text-xs text-gray-500" style="display:none">Quantidade <input type="number" min="1" step="1" value="1" inputmode="numeric" class="q w-20 p-1.5 border border-gray-300 rounded-lg text-center text-sm"></div>';
+    box.appendChild(r);
+  });
+  lista.appendChild(d);
+});
+function itensSel() { const o = {}; lista.querySelectorAll('.it').forEach(function(r) { const c = r.querySelector('.chk'); if (c.checked) o[c.dataset.c] = Math.max(1, parseInt(r.querySelector('.q').value) || 1); }); return o; }
+function sincItens() {
+  let n = 0, tot = 0;
+  lista.querySelectorAll('.it').forEach(function(r) { const c = r.querySelector('.chk'); r.querySelector('.qt').style.display = c.checked ? 'flex' : 'none'; });
+  const sel = itensSel(); n = Object.keys(sel).length; tot = ptsReg({ itens: sel });
+  lista.querySelectorAll('details').forEach(function(d) {
+    let p = 0; Object.keys(sel).forEach(function(c) { if (MAPA[c].setor == d.dataset.s) p += MAPA[c].pts * sel[c]; });
+    d.querySelector('.sc').textContent = p ? '· ' + p + ' pts' : '';
+  });
+  $('contItens').textContent = n ? n + ' item(ns) · ' + tot + ' pontos no dia' : 'Nenhum item selecionado';
+  $('ptsTopo').textContent = tot;
+}
+lista.addEventListener('input', sincItens);
+$('busca').addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  lista.querySelectorAll('details').forEach(function(d) {
+    let v = 0; d.querySelectorAll('.it').forEach(function(r) { const ok = !q || r.dataset.b.indexOf(q) >= 0; r.style.display = ok ? '' : 'none'; if (ok) v++; });
+    d.style.display = v ? '' : 'none'; if (q) d.open = true;
+  });
+});
+
+// ===== Fotos (até 10) =====
+let fotos = [];
+function reduzir(src, max, q, cb) {
+  const im = new Image();
+  im.onload = function() { const e = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.round(im.width * e); c.height = Math.round(im.height * e); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); cb(c.toDataURL('image/jpeg', q)); };
+  im.onerror = function() { cb(src); }; im.src = src;
+}
+function renderFotos() {
+  const g = $('fotoGrid'); g.innerHTML = '';
+  fotos.forEach(function(s, i) { const d = document.createElement('div'); d.className = 'relative'; d.innerHTML = '<img src="' + s + '" class="w-full h-20 object-cover rounded border border-gray-300"><button type="button" data-i="' + i + '" class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 text-xs">✕</button>'; g.appendChild(d); });
+  $('fotoBox').classList.toggle('hidden', !fotos.length); $('fotoCont').textContent = fotos.length + '/10 foto(s) anexada(s)';
+}
+$('fotoGrid').addEventListener('click', function(e) { if (e.target.dataset.i !== undefined) { fotos.splice(+e.target.dataset.i, 1); renderFotos(); } });
+$('fotoInput').addEventListener('change', async function(e) {
+  const arq = Array.from(e.target.files); e.target.value = '';
+  for (const f of arq) {
+    if (fotos.length >= 10) { alert('Máximo de 10 fotos por relatório.'); break; }
+    const s = await new Promise(function(res) { const r = new FileReader(); r.onload = function(ev) { reduzir(ev.target.result, 960, 0.75, res); }; r.onerror = function() { res(null); }; r.readAsDataURL(f); });
+    if (s) fotos.push(s);
+  }
+  renderFotos();
+});
+
+// ===== Diário: carregar / salvar =====
+function limparForm() {
+  $('servico').value = ''; $('desc').value = ''; $('obs').value = ''; $('busca').value = ''; $('busca').dispatchEvent(new Event('input'));
+  lista.querySelectorAll('.chk').forEach(function(c) { c.checked = false; }); lista.querySelectorAll('.q').forEach(function(q) { q.value = 1; });
+  fotos = []; renderFotos(); sincItens();
+}
+function carregarDia(iso) {
+  limparForm(); $('data').value = iso;
+  const r = store.dias[iso]; if (!r) return;
+  $('servico').value = r.servico || ''; $('desc').value = r.desc || ''; $('obs').value = r.obs || '';
+  lista.querySelectorAll('.it').forEach(function(row) { const c = row.querySelector('.chk'); if (r.itens && r.itens[c.dataset.c]) { c.checked = true; row.querySelector('.q').value = r.itens[c.dataset.c]; } });
+  sincItens();
+}
+$('data').addEventListener('change', function() { if (this.value && store.dias[this.value]) carregarDia(this.value); });
+function salvarDia() {
+  if (!$('formD').reportValidity()) return false;
+  store.perfil = { nome: $('nome').value.trim(), matricula: $('matricula').value.trim(), secretaria: $('secretaria').value };
+  store.dias[$('data').value] = { servico: $('servico').value.trim(), itens: itensSel(), desc: $('desc').value.trim(), obs: $('obs').value.trim(), ausencia: '' };
+  gravar(); return true;
+}
+function abrirModal(t, p) { $('modalT').textContent = t; $('modalP').textContent = p; $('modal').style.display = 'flex'; }
+$('modalOk').onclick = function() { $('modal').style.display = 'none'; };
+$('modalNovo').onclick = function() { $('modal').style.display = 'none'; limparForm(); $('data').value = hoje(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+$('btnSalvar').onclick = function() { if (salvarDia()) abrirModal('Dia salvo!', 'Registro de ' + br($('data').value) + ' guardado para o fechamento mensal.'); };
+
+// ===== PDF genérico (html2canvas + jsPDF, quebra de página entre linhas) =====
+function exportarPDF(el, nome) {
+  const outro = el.id === 'pdf-dia' ? $('pdf-mes') : $('pdf-dia'); outro.style.display = 'none'; el.style.display = 'flex';
+  return window.libsPronto
+    .then(function() { return (document.fonts && document.fonts.ready) ? document.fonts.ready : null; })
+    .then(function() { return Promise.all(Array.from(el.querySelectorAll('img')).map(function(i) { return i.decode ? i.decode().catch(function() {}) : null; })); })
+    .then(function() { return new Promise(function(r) { setTimeout(r, 150); }); })
+    .then(function() {
+      const topo = el.getBoundingClientRect().top, marcas = [];
+      Array.from(el.children).forEach(function(c) { if (!c.hasAttribute('data-nq')) marcas.push(c.getBoundingClientRect().bottom - topo); });
+      el.querySelectorAll('[data-q]').forEach(function(r) { marcas.push(r.getBoundingClientRect().bottom - topo); });
+      marcas.sort(function(a, b) { return a - b; });
+      return html2canvas(el, { scale: el.scrollHeight > 2600 ? 1.5 : 2, useCORS: true, backgroundColor: '#ffffff', width: 794, windowWidth: 794, scrollX: 0, scrollY: 0,
+        onclone: function(d) { const w = d.getElementById('pdf-wrap'); w.style.position = 'absolute'; w.style.left = '0px'; w.style.top = '0px'; w.style.zIndex = '0'; }
+      }).then(function(canvas) { return { canvas: canvas, marcas: marcas }; });
+    })
+    .then(function(o) {
+      const canvas = o.canvas, marcas = o.marcas, pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const k = canvas.width / 794, PH = 1122.5, MT = 36, MB = 24, mm = 210 / 794, total = canvas.height / k;
+      let y = 0, pag = 0;
+      while (y < total - 1) {
+        const tp = pag === 0 ? 0 : MT, util = PH - tp; let fim;
+        if (total - y <= util + 1) fim = total;
+        else { const lim = y + util - MB, c = marcas.filter(function(m) { return m > y + 60 && m <= lim; }); fim = c.length ? c[c.length - 1] : lim; }
+        const h = Math.ceil((fim - y) * k), f = document.createElement('canvas'); f.width = canvas.width; f.height = h;
+        const cx = f.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, f.width, h); cx.drawImage(canvas, 0, Math.round(y * k), canvas.width, h, 0, 0, canvas.width, h);
+        if (pag > 0) pdf.addPage();
+        pdf.addImage(f.toDataURL('image/jpeg', 0.92), 'JPEG', 0, tp * mm, 210, (h / k) * mm);
+        y = fim; pag++;
+      }
+      pdf.save(nome);
+    });
+}
+const slug = function(t) { return t.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20); };
+
+// ===== PDF diário =====
+$('formD').addEventListener('submit', function(e) {
+  e.preventDefault(); if (!salvarDia()) return;
+  const b = $('btnPdfD'), txt = b.innerHTML; b.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Gerando...'; b.disabled = true;
+  const iso = $('data').value, r = store.dias[iso], P = store.perfil;
+  $('pd-data').textContent = br(iso); $('pd-sem').textContent = semDe(iso); $('pd-nome').textContent = P.nome; $('pd-mat').textContent = P.matricula; $('pd-sec').textContent = P.secretaria;
+  $('pd-serv').textContent = r.servico || '---'; $('pd-ass').textContent = P.nome; $('pd-desc').textContent = r.desc || '---'; $('pd-obs').textContent = r.obs || '---';
+  const tb = $('pd-itens'); tb.innerHTML = '';
+  SETORES.forEach(function(s) {
+    const cods = s.itens.map(function(i) { return i[0]; }).filter(function(c) { return r.itens[c]; });
+    if (!cods.length) return;
+    tb.insertAdjacentHTML('beforeend', '<tr><td colspan="5" style="background:#f3f4f6"><b>' + s.n + ' ' + esc(s.nome) + '</b></td></tr>');
+    cods.forEach(function(c) { const q = r.itens[c], m = MAPA[c]; tb.insertAdjacentHTML('beforeend', '<tr data-q><td style="text-align:center">' + c + '</td><td>' + esc(m.desc) + '</td><td style="text-align:center">' + q + '</td><td style="text-align:center">' + m.pts + '</td><td style="text-align:center"><b>' + (m.pts * q) + '</b></td></tr>'); });
+  });
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="5" style="text-align:center">Nenhum item informado.</td></tr>';
+  $('pd-tot').textContent = ptsReg(r);
+  const fb = $('pd-fotos'); fb.innerHTML = '';
+  for (let i = 0; i < fotos.length; i += 2) {
+    const l = document.createElement('div'); l.setAttribute('data-q', ''); l.style.cssText = 'display:flex;gap:8px;margin-bottom:8px';
+    fotos.slice(i, i + 2).forEach(function(s) { const c = document.createElement('div'); c.style.cssText = 'flex:1;text-align:center'; const im = document.createElement('img'); im.src = s; im.style.cssText = 'max-width:100%;max-height:230px;border:1px solid #ccc;padding:2px'; c.appendChild(im); l.appendChild(c); });
+    fb.appendChild(l);
+  }
+  $('pd-fbox').style.display = fotos.length ? 'block' : 'none';
+  exportarPDF($('pdf-dia'), 'REVADEF_dia_' + iso + '_' + slug(P.nome) + '.pdf')
+    .then(function() { renderMes(); abrirModal('Relatório gerado!', 'PDF salvo nos Downloads e dia registrado no fechamento mensal.'); })
+    .catch(function(err) { console.error(err); alert('Erro ao gerar o arquivo PDF.'); })
+    .then(function() { b.innerHTML = txt; b.disabled = false; });
+});
+
+// ===== Mensal =====
+const AUS = ['FÉRIAS', 'FERIADO', 'PONTO FACULTATIVO', 'FOLGA', 'OUTRO'];
+function dadosMes() {
+  const p = $('mes').value.split('-').map(Number), Y = p[0], M = p[1], nd = new Date(Y, M, 0).getDate(), dias = [], setor = {}; let tot = 0;
+  for (let d = 1; d <= nd; d++) {
+    const iso = Y + '-' + String(M).padStart(2, '0') + '-' + String(d).padStart(2, '0'), r = store.dias[iso], pt = ptsReg(r);
+    tot += pt; if (r && r.itens) Object.keys(r.itens).forEach(function(c) { if (MAPA[c]) setor[MAPA[c].setor] = (setor[MAPA[c].setor] || 0) + MAPA[c].pts * r.itens[c]; });
+    dias.push({ iso: iso, d: d, sem: semDe(iso), r: r, pt: pt });
+  }
+  return { Y: Y, M: M, dias: dias, setor: setor, tot: tot };
+}
+const codesTxt = function(r) { return Object.keys(r.itens || {}).map(function(c) { return r.itens[c] > 1 ? c + 'x' + r.itens[c] : c; }).join('; '); };
+function renderMes() {
+  if (!$('mes').value) return;
+  const m = dadosMes(), tb = $('linhasMes'); tb.innerHTML = '';
+  m.dias.forEach(function(x) {
+    const fim = x.sem === 'SÁBADO' || x.sem === 'DOMINGO', tem = x.r && x.r.itens && Object.keys(x.r.itens).length;
+    let reg = '<span class="text-gray-300">—</span>';
+    if (x.r && (tem || x.r.servico)) reg = '<div class="font-medium">' + esc(x.r.servico || '') + '</div><div class="text-gray-500">' + esc(codesTxt(x.r)) + '</div>';
+    else if (x.r && x.r.ausencia) reg = '<span class="font-semibold text-gray-600">' + esc(x.r.ausencia) + '</span>';
+    else if (fim) reg = '<span class="text-gray-400">' + x.sem + '</span>';
+    const sel = tem ? '' : '<select data-a="' + x.iso + '" class="border border-gray-300 rounded text-[11px] p-1 w-16"><option value="">•••</option>' + AUS.map(function(a) { return '<option' + (x.r && x.r.ausencia === a ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select>';
+    tb.insertAdjacentHTML('beforeend', '<tr class="border-t border-gray-200' + (fim ? ' bg-gray-100' : '') + '"><td class="py-1.5 pr-1 whitespace-nowrap"><b>' + String(x.d).padStart(2, '0') + '</b> <span class="text-gray-400">' + x.sem.substring(0, 3).toLowerCase() + '</span></td><td class="pr-1">' + reg + '</td><td class="text-right font-bold text-amber-700 pr-1">' + (x.pt || '') + '</td><td class="whitespace-nowrap"><button type="button" data-e="' + x.iso + '" class="text-amber-600 px-1"><i class="fas fa-pen"></i></button>' + sel + '</td></tr>');
+  });
+  const rs = $('resSetor'); rs.innerHTML = '';
+  SETORES.forEach(function(s) { if (m.setor[s.n]) rs.insertAdjacentHTML('beforeend', '<div class="flex justify-between"><span>' + s.n + ' ' + esc(s.nome) + '</span><b>' + m.setor[s.n] + '</b></div>'); });
+  if (!rs.children.length) rs.innerHTML = '<span class="text-gray-400">Sem pontos lançados neste mês.</span>';
+  $('totMes').textContent = m.tot; if (aba === 'M') $('ptsTopo').textContent = m.tot;
+}
+$('mes').addEventListener('change', renderMes);
+$('linhasMes').addEventListener('click', function(e) { const b = e.target.closest('[data-e]'); if (b) { carregarDia(b.dataset.e); mostrar('D'); window.scrollTo({ top: 0 }); } });
+$('linhasMes').addEventListener('change', function(e) {
+  const iso = e.target.dataset.a; if (!iso) return;
+  if (e.target.value) store.dias[iso] = { servico: '', itens: {}, desc: '', obs: '', ausencia: e.target.value }; else delete store.dias[iso];
+  gravar(); renderMes();
+});
+$('btnPdfM').onclick = function() {
+  if (!$('nome').value.trim() || !$('matricula').value.trim()) { alert('Preencha nome e matrícula do fiscal.'); return; }
+  store.perfil = { nome: $('nome').value.trim(), matricula: $('matricula').value.trim(), secretaria: $('secretaria').value }; gravar();
+  const b = $('btnPdfM'), txt = b.innerHTML; b.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Gerando...'; b.disabled = true;
+  const m = dadosMes(), P = store.perfil, nomeMes = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'][m.M - 1];
+  $('pm-ref').textContent = nomeMes.toUpperCase() + ' / ' + m.Y; $('pm-nome').textContent = P.nome; $('pm-mat').textContent = P.matricula; $('pm-sec').textContent = P.secretaria; $('pm-ass').textContent = P.nome;
+  const td = $('pm-dias'); td.innerHTML = '';
+  m.dias.forEach(function(x) {
+    const fim = x.sem === 'SÁBADO' || x.sem === 'DOMINGO', tem = x.r && x.r.itens && Object.keys(x.r.itens).length; let t = '';
+    if (x.r && (tem || x.r.servico)) t = esc(x.r.servico || '') + (tem ? '<br><span style="color:#555">' + esc(codesTxt(x.r)) + '</span>' : ''); else if (x.r && x.r.ausencia) t = esc(x.r.ausencia); else if (fim) t = x.sem;
+    td.insertAdjacentHTML('beforeend', '<tr data-q' + (fim && !tem ? ' style="background:#f3f4f6"' : '') + '><td style="text-align:center">' + br(x.iso).substring(0, 5) + '</td><td style="text-align:center">' + x.sem.substring(0, 3) + '</td><td>' + t + '</td><td style="text-align:center"><b>' + (x.pt || '') + '</b></td></tr>');
+  });
+  const ts = $('pm-set'); ts.innerHTML = '';
+  SETORES.forEach(function(s) { if (m.setor[s.n]) ts.insertAdjacentHTML('beforeend', '<tr data-q><td>' + s.n + ' ' + esc(s.nome) + '</td><td style="text-align:center">' + m.setor[s.n] + '</td></tr>'); });
+  if (!ts.children.length) ts.innerHTML = '<tr><td colspan="2" style="text-align:center">Sem pontos lançados.</td></tr>';
+  $('pm-tot').textContent = m.tot;
+  exportarPDF($('pdf-mes'), 'REVADEF_mes_' + m.Y + '-' + String(m.M).padStart(2, '0') + '_' + slug(P.nome) + '.pdf')
+    .catch(function(err) { console.error(err); alert('Erro ao gerar o arquivo PDF.'); })
+    .then(function() { b.innerHTML = txt; b.disabled = false; });
+};
+
+// ===== Backup =====
+$('btnExp').onclick = function() {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(store)], { type: 'application/json' })); a.download = 'REVADEF_backup_' + hoje() + '.json'; a.click();
+};
+$('impInput').addEventListener('change', function(e) {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const r = new FileReader();
+  r.onload = function(ev) { try { const o = JSON.parse(ev.target.result); Object.assign(store.dias, o.dias || {}); if (!store.perfil.nome && o.perfil) store.perfil = o.perfil; gravar(); renderMes(); alert('Backup importado: ' + Object.keys(o.dias || {}).length + ' dia(s).'); } catch (_) { alert('Arquivo de backup inválido.'); } };
+  r.readAsText(f);
+});
+
+// ===== Abas =====
+let aba = 'D';
+function mostrar(a) {
+  aba = a; const D = a === 'D';
+  $('formD').style.display = D ? '' : 'none'; $('painelM').style.display = D ? 'none' : '';
+  $('barraD').style.display = D ? '' : 'none'; $('btnPdfM').style.display = D ? 'none' : 'flex';
+  $('tabD').className = 'py-2 rounded-lg font-semibold text-sm ' + (D ? 'bg-white text-amber-700' : 'bg-amber-400 text-gray-900');
+  $('tabM').className = 'py-2 rounded-lg font-semibold text-sm ' + (D ? 'bg-amber-400 text-gray-900' : 'bg-white text-amber-700');
+  if (D) sincItens(); else renderMes();
+}
+$('tabD').onclick = function() { mostrar('D'); }; $('tabM').onclick = function() { mostrar('M'); };
+$('data').value = hoje(); $('mes').value = hoje().substring(0, 7); carregarDia($('data').value); mostrar('D');
+</script>
+</body>
+</html>
